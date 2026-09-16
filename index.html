@@ -56,7 +56,21 @@ document.getElementById("status").textContent = !tg ? "Debug: Telegram.WebApp di
 function call(action, extra) {
   const payload = Object.assign({ action: action, initData: tg ? tg.initData : "" }, extra || {});
   return fetch(RELAY_URL, { method: "POST", body: JSON.stringify(payload) })
-    .then(function (r) { return r.json(); });
+    .then(function (r) {
+      return r.text().then(function (text) {
+        // Read as text first, not r.json() directly: an Apps Script/relay
+        // hiccup (quota, interstitial, timeout) comes back as an HTML
+        // page, not JSON, and .json() on that throws an opaque
+        // "Unexpected token '<'" that hides what actually went wrong.
+        // Surfacing the real status + a snippet makes the next one of
+        // these diagnosable instead of a dead end.
+        try {
+          return JSON.parse(text);
+        } catch (e) {
+          return { ok: false, error: "Bad response (HTTP " + r.status + "): " + text.slice(0, 200) };
+        }
+      });
+    });
 }
 
 function esc(s) { return String(s || "").replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }); }
