@@ -32,9 +32,20 @@ background:var(--tg-theme-bg-color,#fff);color:var(--tg-theme-text-color,#000);}
 // GitHub Pages serves this file directly, no wrapper, so the fragment
 // survives and Telegram.WebApp.initData populates correctly. This file
 // only handles the UI; all real data and the actual auth check
-// (verifying initData's HMAC signature) live in the Apps Script backend
-// this calls into — see MiniApp.js in the house-bot repo.
-const EXEC_URL = "https://script.google.com/macros/s/AKfycbwc5YKXQ5j2otkDzi8dqnPAlKS2esgoaf8okUte0iEEYtivo46ZavGK4FWOmjNFuyTX/exec";
+// (verifying initData's HMAC signature) live in the Apps Script backend.
+//
+// Calls go through a small Cloudflare Worker relay, not directly to
+// Apps Script's /exec: Apps Script unconditionally 302-redirects every
+// /exec response (confirmed empirically, unrelated to output type),
+// and Telegram's in-app fetch bridge doesn't handle that redirect the
+// same way a plain browser does (same root issue as the webhook
+// delivery problem documented in this project's history) — direct
+// calls fail with "Failed to fetch" / "Load failed" inside Telegram
+// even though they succeed fine from a normal browser tab. The relay
+// calls Apps Script server-to-server (where redirect-following just
+// works, no client-side restriction involved) and hands back a clean,
+// non-redirecting response.
+const RELAY_URL = "https://house-bot-relay.taputnam.workers.dev/";
 const PRIORITIES = ["low","medium","high","critical"];
 const tg = window.Telegram && window.Telegram.WebApp;
 if (tg) { tg.ready(); tg.expand(); }
@@ -42,17 +53,9 @@ document.getElementById("status").textContent = !tg ? "Debug: Telegram.WebApp di
   : !tg.initData ? "Debug: WebApp loaded but initData is empty (version " + (tg.version || "?") + ", platform " + (tg.platform || "?") + ")."
   : "Loading tasks…";
 
-// Deliberately no Content-Type header: EXEC_URL is a different origin
-// from this page, so this is a cross-origin request. Declaring
-// "application/json" would force a CORS preflight (OPTIONS) that Apps
-// Script cannot answer. Leaving the body as an untyped string makes the
-// browser default to text/plain, which counts as a CORS "simple
-// request" and skips preflight — Apps Script still reads the raw JSON
-// fine via e.postData.contents regardless of what Content-Type was
-// claimed. Do not add a Content-Type header here.
 function call(action, extra) {
   const payload = Object.assign({ action: action, initData: tg ? tg.initData : "" }, extra || {});
-  return fetch(EXEC_URL + "?miniapp=1", { method: "POST", body: JSON.stringify(payload) })
+  return fetch(RELAY_URL, { method: "POST", body: JSON.stringify(payload) })
     .then(function (r) { return r.json(); });
 }
 
