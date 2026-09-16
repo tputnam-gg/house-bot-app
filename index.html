@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Household Tasks</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;margin:0;padding:12px;
+background:var(--tg-theme-bg-color,#fff);color:var(--tg-theme-text-color,#000);}
+.card{background:var(--tg-theme-secondary-bg-color,#f4f4f5);border-radius:10px;padding:10px 12px;margin-bottom:8px;}
+.grp-label{font-size:12px;font-weight:600;color:var(--tg-theme-hint-color,#888);margin:14px 0 6px;}
+.title{font-size:14px;margin:0 0 4px;}
+.meta{font-size:12px;color:var(--tg-theme-hint-color,#888);}
+.pills{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;}
+.pill{font-size:11px;padding:3px 9px;border-radius:999px;border:1px solid var(--tg-theme-hint-color,#ccc);background:transparent;color:inherit;}
+.pill.sel{background:var(--tg-theme-button-color,#2481cc);color:var(--tg-theme-button-text-color,#fff);border-color:transparent;}
+.warn{font-size:12px;color:#c0392b;margin-top:6px;}
+#status{font-size:13px;color:var(--tg-theme-hint-color,#888);padding:20px 0;text-align:center;}
+</style>
+</head>
+<body>
+<div id="status">Loading tasks…</div><div id="app"></div>
+<script>
+// This file lives on GitHub Pages specifically because Google Apps
+// Script's /exec endpoint wraps all browser-facing GET responses in an
+// outer warning page with the real content in a child iframe
+// (googleusercontent.com/userCodeAppPanel) whose src drops any URL
+// fragment from the parent page. Telegram's WebApp bridge delivers
+// initData as a #tgWebAppData=... fragment, so that wrapping makes it
+// structurally unreachable no matter what the page's own JS does.
+// GitHub Pages serves this file directly, no wrapper, so the fragment
+// survives and Telegram.WebApp.initData populates correctly. This file
+// only handles the UI; all real data and the actual auth check
+// (verifying initData's HMAC signature) live in the Apps Script backend
+// this calls into — see MiniApp.js in the house-bot repo.
+const EXEC_URL = "https://script.google.com/macros/s/AKfycbwc5YKXQ5j2otkDzi8dqnPAlKS2esgoaf8okUte0iEEYtivo46ZavGK4FWOmjNFuyTX/exec";
+const PRIORITIES = ["low","medium","high","critical"];
+const tg = window.Telegram && window.Telegram.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+document.getElementById("status").textContent = !tg ? "Debug: Telegram.WebApp did not load (SDK script blocked or failed)."
+  : !tg.initData ? "Debug: WebApp loaded but initData is empty (version " + (tg.version || "?") + ", platform " + (tg.platform || "?") + ")."
+  : "Loading tasks…";
+
+// Deliberately no Content-Type header: EXEC_URL is a different origin
+// from this page, so this is a cross-origin request. Declaring
+// "application/json" would force a CORS preflight (OPTIONS) that Apps
+// Script cannot answer. Leaving the body as an untyped string makes the
+// browser default to text/plain, which counts as a CORS "simple
+// request" and skips preflight — Apps Script still reads the raw JSON
+// fine via e.postData.contents regardless of what Content-Type was
+// claimed. Do not add a Content-Type header here.
+function call(action, extra) {
+  const payload = Object.assign({ action: action, initData: tg ? tg.initData : "" }, extra || {});
+  return fetch(EXEC_URL + "?miniapp=1", { method: "POST", body: JSON.stringify(payload) })
+    .then(function (r) { return r.json(); });
+}
+
+function esc(s) { return String(s || "").replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }); }
+
+function render(tasks) {
+  const order = ["Overdue", "Due today", "Tomorrow", "This week", "Later"];
+  const groups = {}; order.forEach(function (b) { groups[b] = []; });
+  tasks.forEach(function (t) { (groups[t.bucket] || groups.Later).push(t); });
+  let html = "";
+  order.forEach(function (bucket) {
+    if (!groups[bucket].length) return;
+    html += "<div class=\"grp-label\">" + bucket + "</div>";
+    groups[bucket].forEach(function (t) {
+      html += "<div class=\"card\" id=\"task-" + t.id + "\">";
+      html += "<p class=\"title\">" + esc(t.title) + "</p>";
+      html += "<p class=\"meta\">" + [esc(t.owner), t.due, t.effort].filter(Boolean).join(" · ") + "</p>";
+      html += "<div class=\"pills\">" + PRIORITIES.map(function (p) {
+        return "<button class=\"pill" + (t.priority === p ? " sel" : "") + "\" onclick=\"setPriority(" + t.id + ",'" + p + "')\">" + p + "</button>";
+      }).join("") + "</div>";
+      html += "<div class=\"warn\" id=\"warn-" + t.id + "\"></div>";
+      html += "</div>";
+    });
+  });
+  document.getElementById("app").innerHTML = html || "<div id=\"status\">Nothing open right now.</div>";
+}
+
+function setPriority(id, priority) {
+  call("set_priority", { task_id: id, priority: priority }).then(function (res) {
+    if (!res.ok) { document.getElementById("warn-" + id).textContent = res.error || "Failed to update."; return; }
+    const warnEl = document.getElementById("warn-" + id);
+    warnEl.textContent = res.result.priorityConflict ? "⚠ " + res.result.priorityConflict : "";
+    load();
+  }).catch(function (err) {
+    document.getElementById("warn-" + id).textContent = "Network error: " + err;
+  });
+}
+
+function load() {
+  call("list_tasks").then(function (res) {
+    if (!res.ok) { document.getElementById("status").textContent = res.error || "Couldn't load tasks."; return; }
+    document.getElementById("status").style.display = "none";
+    render(res.result);
+  }).catch(function (err) {
+    document.getElementById("status").textContent = "Network error: " + err;
+  });
+}
+load();
+</script>
+</body>
+</html>
