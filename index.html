@@ -74,7 +74,7 @@ function render(tasks) {
       html += "<p class=\"title\">" + esc(t.title) + "</p>";
       html += "<p class=\"meta\">" + [esc(t.owner), t.due, t.effort].filter(Boolean).join(" · ") + "</p>";
       html += "<div class=\"pills\">" + PRIORITIES.map(function (p) {
-        return "<button class=\"pill" + (t.priority === p ? " sel" : "") + "\" onclick=\"setPriority(" + t.id + ",'" + p + "')\">" + p + "</button>";
+        return "<button class=\"pill" + (t.priority === p ? " sel" : "") + "\" data-task-id=\"" + t.id + "\" data-priority=\"" + p + "\">" + p + "</button>";
       }).join("") + "</div>";
       html += "<div class=\"warn\" id=\"warn-" + t.id + "\"></div>";
       html += "</div>";
@@ -82,6 +82,18 @@ function render(tasks) {
   });
   document.getElementById("app").innerHTML = html || "<div id=\"status\">Nothing open right now.</div>";
 }
+
+// Event delegation, not inline onclick attributes: Telegram's WebView
+// appears to enforce a stricter CSP than a normal browser that silently
+// blocks inline event handlers (the rest of the page's externally-
+// loaded script still runs fine — only inline attribute handlers were
+// affected), so pill taps never fired. addEventListener on the
+// container works under even a strict CSP.
+document.getElementById("app").addEventListener("click", function (e) {
+  const btn = e.target.closest(".pill");
+  if (!btn) return;
+  setPriority(btn.getAttribute("data-task-id"), btn.getAttribute("data-priority"));
+});
 
 function setPriority(id, priority) {
   call("set_priority", { task_id: id, priority: priority }).then(function (res) {
