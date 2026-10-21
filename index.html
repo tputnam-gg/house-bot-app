@@ -111,38 +111,52 @@ function render(tasks) {
 // loaded script still runs fine — only inline attribute handlers were
 // affected), so pill taps never fired. addEventListener on the
 // container works under even a strict CSP.
+// Apps Script round trips routinely take several seconds, so a tap with
+// no visible reaction until then reads as "did that even register?".
+// Dim + disable the tapped button immediately, before the network call
+// even starts; a success path reloads the list (which replaces the DOM
+// wholesale, clearing it naturally), a failure path explicitly restores
+// it so the button's tappable again.
+function setPending(el, pending) {
+  if (!el) return;
+  el.disabled = pending;
+  el.style.opacity = pending ? "0.4" : "";
+}
+
 document.getElementById("app").addEventListener("click", function (e) {
   const pill = e.target.closest(".pill");
-  if (pill) { setPriority(pill.getAttribute("data-task-id"), pill.getAttribute("data-priority")); return; }
+  if (pill) { setPending(pill, true); setPriority(pill.getAttribute("data-task-id"), pill.getAttribute("data-priority"), pill); return; }
   const doneBtn = e.target.closest(".done-btn");
-  if (doneBtn) { completeTask(doneBtn.getAttribute("data-task-id")); return; }
+  if (doneBtn) { setPending(doneBtn, true); completeTask(doneBtn.getAttribute("data-task-id"), doneBtn); return; }
   const snoozeBtn = e.target.closest(".snooze-btn");
-  if (snoozeBtn) { snoozeTask(snoozeBtn.getAttribute("data-task-id"), snoozeBtn.getAttribute("data-weeks")); return; }
+  if (snoozeBtn) { setPending(snoozeBtn, true); snoozeTask(snoozeBtn.getAttribute("data-task-id"), snoozeBtn.getAttribute("data-weeks"), snoozeBtn); return; }
 });
 
-function setPriority(id, priority) {
+function setPriority(id, priority, btn) {
   call("set_priority", { task_id: id, priority: priority }).then(function (res) {
-    if (!res.ok) { document.getElementById("warn-" + id).textContent = res.error || "Failed to update."; return; }
+    if (!res.ok) { setPending(btn, false); document.getElementById("warn-" + id).textContent = res.error || "Failed to update."; return; }
     const warnEl = document.getElementById("warn-" + id);
     warnEl.textContent = res.result.priorityConflict ? "⚠ " + res.result.priorityConflict : "";
     load();
   }).catch(function (err) {
+    setPending(btn, false);
     document.getElementById("warn-" + id).textContent = "Network error: " + err;
   });
 }
 
-function snoozeTask(id, weeks) {
+function snoozeTask(id, weeks, btn) {
   call("snooze_task", { task_id: id, weeks: parseInt(weeks, 10) }).then(function (res) {
-    if (!res.ok) { document.getElementById("warn-" + id).textContent = res.error || "Failed to push out."; return; }
+    if (!res.ok) { setPending(btn, false); document.getElementById("warn-" + id).textContent = res.error || "Failed to push out."; return; }
     load();
   }).catch(function (err) {
+    setPending(btn, false);
     document.getElementById("warn-" + id).textContent = "Network error: " + err;
   });
 }
 
-function completeTask(id) {
+function completeTask(id, btn) {
   call("complete_task", { task_id: id }).then(function (res) {
-    if (!res.ok) { document.getElementById("warn-" + id).textContent = res.error || "Failed to complete."; return; }
+    if (!res.ok) { setPending(btn, false); document.getElementById("warn-" + id).textContent = res.error || "Failed to complete."; return; }
     const r = res.result;
     let note = r.recurring ? "✓ Done — next due " + (r.next_due || "soon") : "";
     if (r.parentReadyToComplete) {
@@ -159,6 +173,7 @@ function completeTask(id) {
       load();
     }
   }).catch(function (err) {
+    setPending(btn, false);
     document.getElementById("warn-" + id).textContent = "Network error: " + err;
   });
 }
