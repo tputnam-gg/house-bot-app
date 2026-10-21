@@ -13,8 +13,9 @@ background:var(--tg-theme-bg-color,#fff);color:var(--tg-theme-text-color,#000);}
 .title{font-size:14px;margin:0 0 4px;}
 .meta{font-size:12px;color:var(--tg-theme-hint-color,#888);}
 .pills{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;}
-.pill{font-size:11px;padding:3px 9px;border-radius:999px;border:1px solid var(--tg-theme-hint-color,#ccc);background:transparent;color:inherit;}
+.pill,.snooze-btn{font-size:11px;padding:3px 9px;border-radius:999px;border:1px solid var(--tg-theme-hint-color,#ccc);background:transparent;color:inherit;}
 .pill.sel{background:var(--tg-theme-button-color,#2481cc);color:var(--tg-theme-button-text-color,#fff);border-color:transparent;}
+.snooze-btn:active{background:var(--tg-theme-button-color,#2481cc);color:var(--tg-theme-button-text-color,#fff);border-color:transparent;}
 .card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;}
 .done-btn{font-size:11px;padding:4px 10px;border-radius:999px;border:1px solid var(--tg-theme-hint-color,#ccc);background:transparent;color:inherit;white-space:nowrap;flex-shrink:0;}
 .done-btn:active{background:var(--tg-theme-button-color,#2481cc);color:var(--tg-theme-button-text-color,#fff);border-color:transparent;}
@@ -94,6 +95,9 @@ function render(tasks) {
       html += "<div class=\"pills\">" + PRIORITIES.map(function (p) {
         return "<button class=\"pill" + (t.priority === p ? " sel" : "") + "\" data-task-id=\"" + t.id + "\" data-priority=\"" + p + "\">" + p + "</button>";
       }).join("") + "</div>";
+      html += "<div class=\"pills\">" + [1, 2, 3].map(function (w) {
+        return "<button class=\"snooze-btn\" data-task-id=\"" + t.id + "\" data-weeks=\"" + w + "\">+" + w + "w</button>";
+      }).join("") + "</div>";
       html += "<div class=\"warn\" id=\"warn-" + t.id + "\"></div>";
       html += "</div>";
     });
@@ -112,6 +116,8 @@ document.getElementById("app").addEventListener("click", function (e) {
   if (pill) { setPriority(pill.getAttribute("data-task-id"), pill.getAttribute("data-priority")); return; }
   const doneBtn = e.target.closest(".done-btn");
   if (doneBtn) { completeTask(doneBtn.getAttribute("data-task-id")); return; }
+  const snoozeBtn = e.target.closest(".snooze-btn");
+  if (snoozeBtn) { snoozeTask(snoozeBtn.getAttribute("data-task-id"), snoozeBtn.getAttribute("data-weeks")); return; }
 });
 
 function setPriority(id, priority) {
@@ -119,6 +125,15 @@ function setPriority(id, priority) {
     if (!res.ok) { document.getElementById("warn-" + id).textContent = res.error || "Failed to update."; return; }
     const warnEl = document.getElementById("warn-" + id);
     warnEl.textContent = res.result.priorityConflict ? "⚠ " + res.result.priorityConflict : "";
+    load();
+  }).catch(function (err) {
+    document.getElementById("warn-" + id).textContent = "Network error: " + err;
+  });
+}
+
+function snoozeTask(id, weeks) {
+  call("snooze_task", { task_id: id, weeks: parseInt(weeks, 10) }).then(function (res) {
+    if (!res.ok) { document.getElementById("warn-" + id).textContent = res.error || "Failed to push out."; return; }
     load();
   }).catch(function (err) {
     document.getElementById("warn-" + id).textContent = "Network error: " + err;
