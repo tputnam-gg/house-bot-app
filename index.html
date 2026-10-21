@@ -15,6 +15,9 @@ background:var(--tg-theme-bg-color,#fff);color:var(--tg-theme-text-color,#000);}
 .pills{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;}
 .pill{font-size:11px;padding:3px 9px;border-radius:999px;border:1px solid var(--tg-theme-hint-color,#ccc);background:transparent;color:inherit;}
 .pill.sel{background:var(--tg-theme-button-color,#2481cc);color:var(--tg-theme-button-text-color,#fff);border-color:transparent;}
+.card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;}
+.done-btn{font-size:11px;padding:4px 10px;border-radius:999px;border:1px solid var(--tg-theme-hint-color,#ccc);background:transparent;color:inherit;white-space:nowrap;flex-shrink:0;}
+.done-btn:active{background:var(--tg-theme-button-color,#2481cc);color:var(--tg-theme-button-text-color,#fff);border-color:transparent;}
 .warn{font-size:12px;color:#c0392b;margin-top:6px;}
 #status{font-size:13px;color:var(--tg-theme-hint-color,#888);padding:20px 0;text-align:center;}
 </style>
@@ -85,7 +88,8 @@ function render(tasks) {
     html += "<div class=\"grp-label\">" + bucket + "</div>";
     groups[bucket].forEach(function (t) {
       html += "<div class=\"card\" id=\"task-" + t.id + "\">";
-      html += "<p class=\"title\">" + esc(t.title) + "</p>";
+      html += "<div class=\"card-head\"><p class=\"title\">" + esc(t.title) + "</p>";
+      html += "<button class=\"done-btn\" data-task-id=\"" + t.id + "\">✓ Done</button></div>";
       html += "<p class=\"meta\">" + [esc(t.owner), t.due, t.effort].filter(Boolean).join(" · ") + "</p>";
       html += "<div class=\"pills\">" + PRIORITIES.map(function (p) {
         return "<button class=\"pill" + (t.priority === p ? " sel" : "") + "\" data-task-id=\"" + t.id + "\" data-priority=\"" + p + "\">" + p + "</button>";
@@ -104,9 +108,10 @@ function render(tasks) {
 // affected), so pill taps never fired. addEventListener on the
 // container works under even a strict CSP.
 document.getElementById("app").addEventListener("click", function (e) {
-  const btn = e.target.closest(".pill");
-  if (!btn) return;
-  setPriority(btn.getAttribute("data-task-id"), btn.getAttribute("data-priority"));
+  const pill = e.target.closest(".pill");
+  if (pill) { setPriority(pill.getAttribute("data-task-id"), pill.getAttribute("data-priority")); return; }
+  const doneBtn = e.target.closest(".done-btn");
+  if (doneBtn) { completeTask(doneBtn.getAttribute("data-task-id")); return; }
 });
 
 function setPriority(id, priority) {
@@ -115,6 +120,29 @@ function setPriority(id, priority) {
     const warnEl = document.getElementById("warn-" + id);
     warnEl.textContent = res.result.priorityConflict ? "⚠ " + res.result.priorityConflict : "";
     load();
+  }).catch(function (err) {
+    document.getElementById("warn-" + id).textContent = "Network error: " + err;
+  });
+}
+
+function completeTask(id) {
+  call("complete_task", { task_id: id }).then(function (res) {
+    if (!res.ok) { document.getElementById("warn-" + id).textContent = res.error || "Failed to complete."; return; }
+    const r = res.result;
+    let note = r.recurring ? "✓ Done — next due " + (r.next_due || "soon") : "";
+    if (r.parentReadyToComplete) {
+      note += (note ? " · " : "✓ Done — ") + "all subtasks done on \"" + esc(r.parentReadyToComplete.title) + "\"";
+    }
+    if (note) {
+      // Brief flash before reload — the completed card is about to
+      // disappear from the list entirely, so there's no card left to
+      // show this on by the time the reload finishes.
+      document.getElementById("status").style.display = "";
+      document.getElementById("status").textContent = note;
+      setTimeout(load, 1400);
+    } else {
+      load();
+    }
   }).catch(function (err) {
     document.getElementById("warn-" + id).textContent = "Network error: " + err;
   });
